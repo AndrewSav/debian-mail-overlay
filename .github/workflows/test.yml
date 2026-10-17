@@ -1,0 +1,45 @@
+# debian-mail-overlay/.github/workflows/test.yml
+#
+# Builds the overlay image from the PR, builds mailserver master on top of
+# it, and runs all nine mailserver test suites. Everything happens on one
+# runner: no registry, no secrets, no changes to the mailserver repo.
+
+name: test
+
+on:
+  pull_request:
+    # ready_for_review: bump.yml opens draft PRs; marking one ready starts the tests
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: # "Run workflow" on the Actions tab tests any branch by hand
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out overlay
+        uses: actions/checkout@v4
+
+      - name: Build overlay image
+        run: docker build -t mailserver2/debian-mail-overlay:ci .
+
+      - name: Check out mailserver master
+        uses: actions/checkout@v4
+        with:
+          repository: mailserver2/mailserver
+          path: mailserver
+          submodules: recursive
+
+      - name: Point mailserver at the candidate overlay
+        working-directory: mailserver
+        run: |
+          sed -i 's|^FROM mailserver2/debian-mail-overlay:.*|FROM mailserver2/debian-mail-overlay:ci|' Dockerfile
+          grep '^FROM' Dockerfile
+
+      # `make` = build-no-cache + all nine suites + clean. Without --pull,
+      # docker build uses the local :ci image instead of Docker Hub.
+      - name: Build mailserver and run all suites
+        working-directory: mailserver
+        run: make
